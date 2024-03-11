@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js webgl - materials - wireframe</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<link type="text/css" rel="stylesheet" href="main.css">
+		<script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+	</head>
+	<body>
+		<div style="position: fixed; top: 10px; left: 10px; z-index: 100; display: flex; flex-direction: column;">
+			<button id="cropImage" style="width: 100px; margin-bottom: 5px;">截取照片</button>
+			<button id="showModel" style="width: 100px; margin-bottom: 5px;">展示模型</button>
+			<button id="showWireframe" style="width: 100px; margin-bottom: 5px;">展示线框</button>
+			<button id="rotateX" style="width: 100px; margin-bottom: 5px;">X轴转动</button>
+			<button id="rotateY" style="width: 100px; margin-bottom: 5px;">Y轴转动</button>
+			<button id="rotateZ" style="width: 100px; margin-bottom: 5px;">Z轴转动</button>
+		</div>
+		<div id="info">
+			<a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> webgl - materials - wireframe
+		</div>
+
+		<script type="x-shader/x-vertex" id="vertexShader">
+
+			attribute vec3 center;
+			varying vec3 vCenter;
+
+			void main() {
+
+				vCenter = center;
+
+				gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+
+			}
+
+		</script>
+
+		<script type="x-shader/x-fragment" id="fragmentShader">
+
+			uniform float thickness;
+
+			varying vec3 vCenter;
+
+			void main() {
+
+				vec3 afwidth = fwidth( vCenter.xyz );
+
+				vec3 edge3 = smoothstep( ( thickness - 1.0 ) * afwidth, thickness * afwidth, vCenter.xyz );
+
+				float edge = 1.0 - min( min( edge3.x, edge3.y ), edge3.z );
+
+				gl_FragColor.rgb = gl_FrontFacing ? vec3( 0.9, 0.9, 1.0 ) : vec3( 0.4, 0.4, 0.5 );
+				gl_FragColor.a = edge;
+
+			}
+
+		</script>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "./build/three.module.js",
+					"three/addons/": "./jsm/"
+				}
+			}
+		</script>
+
+		<script type="module">
+			import * as THREE from 'three';
+			import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+			import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+			import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
+			import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+
+			// 线框的厚度
+			const thickness = 1.4;
+
+			let renderer, scene, camera, controls, modelCenter, distance, modelGroup, wireframeGroup, fileName;
+
+			window.onload = init;
+
+			const wireframeMaterial = new THREE.ShaderMaterial( {
+				uniforms: { 'thickness': { value: thickness } },
+				vertexShader: document.getElementById( 'vertexShader' ).textContent,
+				fragmentShader: document.getElementById( 'fragmentShader' ).textContent,
+				side: THREE.DoubleSide,
+				alphaToCoverage: true // only works when WebGLRenderer's "antialias" is set to "true"
+			} );
+			wireframeMaterial.extensions.derivatives = true;
+
+			document.getElementById('cropImage').addEventListener('click', function(){
+				cropImage()
+			}, false);
+
+			document.getElementById('showModel').addEventListener('click', function(){
+				modelGroup.visible = true
+				wireframeGroup.visible = false
+				render();
+			}, false);
+
+			document.getElementById('showWireframe').addEventListener('click', function(){
+				modelGroup.visible = false
+				wireframeGroup.visible = true
+				render();
+			}, false);
+
+			let time = 100;
+			const angle = 2 * Math.PI / time;
+			document.getElementById('rotateX').addEventListener('click', function(){
+				scene.rotation.x = scene.rotation.x + angle;
+				render();
+			}, false);
+
+			document.getElementById('rotateY').addEventListener('click', function(){
+				scene.rotation.y = scene.rotation.y + angle;
+				render();
+			}, false);
+
+			document.getElementById('rotateZ').addEventListener('click', function(){
+				scene.rotation.z = scene.rotation.z + angle;
+				render();
+			}, false);
+
+			async function init() {
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				document.body.appendChild( renderer.domElement );
+
+				scene = new THREE.Scene();
+				scene.background = new THREE.Color(0x000000); // 使用十六进制颜色值设置背景色
+
+				camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+
+				controls = new OrbitControls( camera, renderer.domElement );
+				// 将最小极角设为 0，最大极角设为 Math.PI，这样就可以在所有角度上旋转了
+				controls.minPolarAngle = 0;
+				controls.maxPolarAngle = Math.PI;
+				controls.addEventListener( 'change', render ); // use if there is no animation loop
+
+				var ambientLight = new THREE.AmbientLight(0xffffff, 2);
+    			scene.add(ambientLight);
+
+				// 创建坐标轴（参数是坐标轴的长度）
+				// var axesHelper = new THREE.AxesHelper(7);
+				// scene.add(axesHelper);
+
+				// let modelInfo = { rootPath: 'models/', modelName: 'splash.glb', mtlName: ''}
+				let modelInfo = { rootPath: 'models/grondtruth_obj/', modelName: 'scene.obj', mtlName: 'scene.obj.mtl'}
+				// let modelInfo = { rootPath: 'models/Model_obj/', modelName: 'Model.obj', mtlName: 'Model.mtl'}
+
+				fileName = modelInfo.modelName.split('.')[0]
+
+				let model = await getModel(modelInfo)
+				autoCameraPosition(model)
+
+				modelGroup = new THREE.Group();
+				modelGroup.position.x = - modelCenter.x;
+				modelGroup.position.y = - modelCenter.y;
+				modelGroup.position.z = - modelCenter.z;
+				modelGroup.add(model);
+				scene.add(modelGroup);
+
+				console.error(modelGroup)
+
+				console.error("modelCenter", modelCenter)
+
+				wireframeGroup = getWireframe(model)
+				scene.add(wireframeGroup);
+
+				window.addEventListener( 'resize', onWindowResize );
+				render();
+			}
+
+			function setupAttributes( geometry ) {
+				const vectors = [
+					new THREE.Vector3( 1, 0, 0 ),
+					new THREE.Vector3( 0, 1, 0 ),
+					new THREE.Vector3( 0, 0, 1 )
+				];
+
+				const position = geometry.attributes.position;
+				const centers = new Float32Array( position.count * 3 );
+
+				for ( let i = 0, l = position.count; i < l; i ++ ) {
+
+					vectors[ i % 3 ].toArray( centers, i * 3 );
+
+				}
+
+				geometry.setAttribute( 'center', new THREE.BufferAttribute( centers, 3 ) );
+			}
+
+			function onWindowResize() {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+
+				renderer.setSize( window.innerWidth, window.innerHeight );
+			}
+
+			function render() {
+				renderer.render( scene, camera );
+			}
+
+
+			// 加载模型
+			function getModel({ rootPath, modelName, mtlName }){
+				return new Promise((resolve) => {
+					if(modelName.endsWith('.glb')){
+						// 加载GLB模型
+						const loader = new GLTFLoader();
+						loader.setPath(rootPath); 
+						loader.load(modelName, (gltf) => {
+							const model = gltf.scene;
+							
+							model.traverse(function (child) {
+								if (child.isMesh) {
+									child.material.roughness = 0.01;
+									child.material.metalness = 1;
+									child.material.color = new THREE.Color(0x0000ff);
+									child.material.emissive = new THREE.Color(0x0000ff);
+									child.material.emissiveIntensity = 0.2;
+								}
+							});
+
+							resolve(model)
+						});
+					} else if(modelName.endsWith('.obj')){
+						var mtlLoader = new MTLLoader();
+						mtlLoader.setPath(rootPath); // 设置MTL文件的根路径
+						mtlLoader.load(mtlName, function(materials) {
+							materials.preload();
+							var objLoader = new OBJLoader();
+							objLoader.setMaterials(materials);
+							objLoader.setPath(rootPath); // 设置OBJ文件的根路径
+							objLoader.load(modelName, function(model) {
+								resolve(model)
+							});
+						});
+					}
+				})
+			}
+
+			function getWireframe(model, group = new THREE.Group()){
+				group.position.x = - modelCenter.x;
+				group.position.y = - modelCenter.y;
+				group.position.z = - modelCenter.z;
+				
+				if (model.isMesh) {
+					// 加载黑色模型
+					// 创建材质
+					const material = new THREE.MeshBasicMaterial({ 
+						color: 0x000000, 
+						side: THREE.FrontSide,
+						polygonOffset: true,
+						polygonOffsetFactor: 1, // positive value pushes polygon further away
+						polygonOffsetUnits: 1,
+					});
+					// 创建网格
+					const mesh = new THREE.Mesh(model.geometry, material);
+					// 将网格添加到场景中
+					group.add(mesh);
+
+					let geometry = model.geometry.clone();
+					geometry.deleteAttribute( 'normal' );
+					geometry.deleteAttribute( 'uv' );
+					setupAttributes( geometry );
+					const wireframe = new THREE.Mesh( geometry, wireframeMaterial );
+					wireframe.renderOrder = 1; // make sure wireframes are rendered 2nd
+					// 将线框网格添加到场景中
+					group.add(wireframe);
+				} else {
+					model.children.forEach(child => {
+						getWireframe(child, group)
+					})
+				}
+				return group
+			}
+
+			// 自适应相机的初始位置
+			function autoCameraPosition(model){
+				function degToRad(degrees) {
+					return degrees * Math.PI / 180;
+				}
+				
+				// 计算包围盒
+				let box = new THREE.Box3().setFromObject(model);
+				// 获取模型的中心点
+				modelCenter = box.getCenter(new THREE.Vector3());
+				let boxSize = box.getSize(new THREE.Vector3()).length();
+
+				// 设置相机位置
+				let halfSizeToFitOnScreen = boxSize * 0.5;
+				let halfFovY = degToRad(camera.fov * 0.5);
+				distance = halfSizeToFitOnScreen / Math.tan(halfFovY) * 1.2;
+				camera.position.set(distance, 0, 0);
+				camera.lookAt(scene.position);
+				camera.near = boxSize / 100;
+				camera.far = boxSize * 100;
+				camera.updateProjectionMatrix();
+			}
+		
+			// 截取照片
+			async function cropImage() {
+				for(let i = 0; i < time; i++) {
+					scene.rotation.x = scene.rotation.x + angle;
+					await saveImage(fileName, 'x', i)
+				}
+
+				for(let i = 0; i < time; i++) {
+					scene.rotation.y = scene.rotation.y + angle;
+					await saveImage(fileName, 'y', i)
+				}
+
+				for(let i = 0; i < time; i++) {
+					scene.rotation.z = scene.rotation.z + angle;
+					await saveImage(fileName, 'z', i)
+				}
+			}
+
+			async function saveImage(fileName, type, i) {
+				// 保存模型截图
+				modelGroup.visible = true
+				wireframeGroup.visible = false
+				render()
+
+				let screenshot = renderer.domElement.toDataURL('image/jpeg', 1);
+				// 发送POST请求
+				let resp = await axios.post('http://localhost:9000/save', {
+					image: screenshot,
+					fileName,
+					imageName: `model_${type}_${i}.jpg`
+				})
+
+				console.error(resp.data)
+
+				// 保存wireframe截图
+				modelGroup.visible = false
+				wireframeGroup.visible = true
+				render()
+
+				screenshot = renderer.domElement.toDataURL('image/jpeg', 1);
+				// 发送POST请求
+				resp = await axios.post('http://localhost:9000/save', {
+					image: screenshot,
+					fileName,
+					imageName: `wireframe_${type}_${i}.jpg`
+				})
+
+				console.error(resp.data)
+			}
+		</script>
+	</body>
+</html>
