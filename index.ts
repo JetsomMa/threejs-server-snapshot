@@ -5,7 +5,7 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 
 const app = express();
-const port = 9000;
+const port = 19000;
 
 // 增加请求体大小限制为10mb
 app.use(bodyParser.json({ limit: '2mb' }));
