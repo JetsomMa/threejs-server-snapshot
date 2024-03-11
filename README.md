@@ -10,3 +10,5 @@ pnpm dev
 
 ## 打开项目
 http://localhost:9000/web/index.html
+
+## 线上demo地址：http://118.195.236.91:19000/web/index.html
