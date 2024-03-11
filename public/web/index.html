@@ -326,7 +326,7 @@
 
 				let screenshot = renderer.domElement.toDataURL('image/jpeg', 1);
 				// 发送POST请求
-				let resp = await axios.post('http://localhost:9000/save', {
+				let resp = await axios.post('/save', {
 					image: screenshot,
 					fileName,
 					imageName: `model_${type}_${i}.jpg`
@@ -341,7 +341,7 @@
 
 				screenshot = renderer.domElement.toDataURL('image/jpeg', 1);
 				// 发送POST请求
-				resp = await axios.post('http://localhost:9000/save', {
+				resp = await axios.post('/save', {
 					image: screenshot,
 					fileName,
 					imageName: `wireframe_${type}_${i}.jpg`
